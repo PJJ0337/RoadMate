@@ -7,11 +7,14 @@
     <!-- 일반 권한 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Vehicle SDK: 조회(CAR_*) / 제어(CONTROL_CAR_*) -->
     <uses-permission android:name="pleos.car.permission.CAR_DOORS" />
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
     <uses-permission android:name="pleos.car.permission.CAR_SAFETY" />
+    <!-- 순정 졸음 경고등(Telltale) 구독용. 시스템 권한이라 일반 앱에는 허용되지 않을 수 있음 (사무국 문의 중) -->
+    <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_SAFETY" />
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
