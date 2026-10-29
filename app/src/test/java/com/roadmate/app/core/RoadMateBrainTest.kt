@@ -97,4 +97,14 @@ class RoadMateBrainTest {
         val again = brain.onAnswer("쉬고 싶어")
         assertTrue(again.none { it == Action.NavigateToRest })
     }
+
+    @Test
+    fun 졸음_다발_구간에서는_더_일찍_말을_건다() {
+        driving()
+        brain.onTripMinutes(130)                    // 30점 → 평상시
+        assertTrue(brain.tick(hourOfDay = 10).isEmpty())
+        brain.onHotspot(true)                       // +10점 → 40점 주의
+        val speak = brain.tick(hourOfDay = 10).single() as Action.Speak
+        assertTrue(speak.text.contains("자주 졸았던"))
+    }
 }

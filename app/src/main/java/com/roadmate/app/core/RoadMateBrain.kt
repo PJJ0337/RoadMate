@@ -50,6 +50,7 @@ class RoadMateBrain(
     private var cruiseOnSinceMs: Long? = null
     private var lastDriverInputMs: Long = now()
     private var dawWarningOn = false
+    private var inHotspot = false         // 졸음 지도: 졸음 다발 구간 안인지
     private var missedResponses = 0
     private var parked = true
     private var lastPromptMs: Long? = null   // 마지막으로 먼저 말 건 시각
@@ -74,6 +75,9 @@ class RoadMateBrain(
     fun onDawWarning(on: Boolean) { dawWarningOn = on }
 
     fun onGear(isPark: Boolean) { parked = isPark }
+
+    /** 졸음 지도에서 '사람들이 자주 조는 구간'에 들어왔는지 */
+    fun onHotspot(inside: Boolean) { inHotspot = inside }
 
     /** 운전자가 대답했을 때. 돌려준 Action으로 바로 응답한다. */
     fun onAnswer(text: String): List<Action> {
@@ -128,7 +132,8 @@ class RoadMateBrain(
                 cruiseActiveMinutes = cruiseOnSinceMs?.let { ((t - it) / 60_000L).toInt() } ?: 0,
                 minutesSinceDriverInput = ((t - lastDriverInputMs) / 60_000L).toInt(),
                 dawWarningOn = dawWarningOn,
-                missedResponses = missedResponses
+                missedResponses = missedResponses,
+                inDrowsyHotspot = inHotspot
             )
         )
         lastResult = result
@@ -147,7 +152,7 @@ class RoadMateBrain(
         ) {
             phase = Phase.TALKING
             lastPromptMs = t
-            return listOf(Action.Speak(script.opener(continuousMinutes, dawWarningOn), listenAfter = true))
+            return listOf(Action.Speak(script.opener(continuousMinutes, dawWarningOn, inHotspot), listenAfter = true))
         }
 
         if (result.level == DrowsinessRiskEngine.Level.NORMAL && phase == Phase.TALKING) {

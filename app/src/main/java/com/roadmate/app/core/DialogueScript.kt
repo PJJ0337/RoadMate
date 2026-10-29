@@ -24,9 +24,10 @@ class DialogueScript {
     private var replyIndex = 0
 
     /** 먼저 말 걸기. 상황(운전 시간, 순정 졸음 경고)에 맞는 첫마디를 붙인다. */
-    fun opener(continuousMinutes: Int, dawWarningOn: Boolean): String {
+    fun opener(continuousMinutes: Int, dawWarningOn: Boolean, inHotspot: Boolean = false): String {
         val intro = when {
             dawWarningOn -> "차가 졸음 경고를 보냈어요."
+            inHotspot -> "이 구간은 다른 운전자분들도 자주 졸았던 곳이에요."
             continuousMinutes >= 60 -> "쉬지 않고 ${formatMinutes(continuousMinutes)} 운전하셨어요."
             else -> "운전하시느라 고생 많으세요."
         }
