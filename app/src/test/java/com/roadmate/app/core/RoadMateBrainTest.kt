@@ -1,0 +1,100 @@
+package com.roadmate.app.core
+
+import com.roadmate.app.core.RoadMateBrain.Action
+import com.roadmate.app.core.RoadMateBrain.Phase
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** 4단계 흐름(예측 → 대화 → 안내 → 파워냅)이 순서대로 동작하는지 검증 */
+class RoadMateBrainTest {
+
+    private var clock = 0L
+    private val brain = RoadMateBrain(RoadMateBrain.Config.DEMO, now = { clock })
+
+    private fun driving() { brain.onGear(isPark = false) }
+
+    @Test
+    fun 짧게_운전하면_말을_걸지_않는다() {
+        driving()
+        brain.onTripMinutes(20)
+        assertTrue(brain.tick(hourOfDay = 10).isEmpty())
+        assertEquals(Phase.DRIVING, brain.phase)
+    }
+
+    @Test
+    fun 순정_졸음경고가_켜지면_먼저_말을_건다() {
+        driving()
+        brain.onDawWarning(true)
+        val actions = brain.tick(hourOfDay = 10)
+        val speak = actions.single() as Action.Speak
+        assertTrue(speak.listenAfter)
+        assertTrue(speak.text.contains("졸음 경고"))
+        assertEquals(Phase.TALKING, brain.phase)
+    }
+
+    @Test
+    fun 말_걸기는_간격을_두고_반복한다() {
+        driving()
+        brain.onDawWarning(true)
+        assertEquals(1, brain.tick(10).size)
+        clock += 5_000
+        assertTrue(brain.tick(10).isEmpty())        // 15초 간격 전에는 다시 말하지 않음
+        clock += 15_000
+        assertEquals(1, brain.tick(10).size)
+    }
+
+    @Test
+    fun 대답이_계속_없으면_졸음쉼터로_안내한다() {
+        driving()
+        brain.onTripMinutes(130)                    // 30점
+        brain.onDawWarning(true)                    // +25점 → 주의
+        brain.tick(10)
+        brain.onNoAnswer()                          // +20점
+        brain.onNoAnswer()                          // +20점 → 95점 위험
+        clock += 20_000
+        val actions = brain.tick(10)
+        assertTrue(actions.contains(Action.NavigateToRest))
+        assertEquals(Phase.GUIDING_TO_REST, brain.phase)
+    }
+
+    @Test
+    fun 쉬고_싶다고_말하면_바로_안내한다() {
+        driving()
+        val actions = brain.onAnswer("너무 졸려 쉬고 싶어")
+        assertTrue(actions.contains(Action.NavigateToRest))
+        assertEquals(Phase.GUIDING_TO_REST, brain.phase)
+    }
+
+    @Test
+    fun 주차하면_낮잠_시간이_지나면_깨운다() {
+        driving()
+        brain.onTripMinutes(150)
+        brain.onAnswer("쉬고 싶어")                  // 안내 단계
+        brain.onGear(isPark = true)
+        assertTrue(brain.tick(10).contains(Action.StartNap))
+        assertEquals(Phase.NAPPING, brain.phase)
+
+        clock += 10_000
+        assertTrue(brain.tick(10).isEmpty())        // 아직 낮잠 중
+        clock += 25_000
+        assertTrue(brain.tick(10).contains(Action.StartWake))
+        assertEquals(Phase.DRIVING, brain.phase)
+        assertEquals(0, brain.continuousMinutes)    // 쉰 뒤에는 연속 운전 시간이 다시 0부터
+    }
+
+    @Test
+    fun 주차_중에는_말을_걸지_않는다() {
+        brain.onGear(isPark = true)
+        brain.onDawWarning(true)
+        assertTrue(brain.tick(3).isEmpty())
+    }
+
+    @Test
+    fun 이미_안내_중이면_다시_안내하지_않는다() {
+        driving()
+        brain.onAnswer("쉬고 싶어")
+        val again = brain.onAnswer("쉬고 싶어")
+        assertTrue(again.none { it == Action.NavigateToRest })
+    }
+}
