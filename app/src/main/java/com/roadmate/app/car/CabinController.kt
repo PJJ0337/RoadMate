@@ -40,6 +40,10 @@ class CabinController(
     private var backrestArea: SeatArea = driverSeat
     private var windowArea = WindowArea(WindowValue.ROW_1_LEFT)
     private var windowRange = 0..100
+    private var seatTempArea: SeatArea = driverSeat
+    private var seatTempRange = 0..3          // 음수 = 통풍(V), 양수 = 열선(H)
+    private var seatVentArea: SeatArea = driverSeat
+    private var seatVentRange = 0..3
 
     /** 차량이 지원하는 제어 영역·범위 확인. 차량 서비스 연결 후 한 번 호출한다. */
     fun prepare() {
@@ -80,6 +84,20 @@ class CabinController(
                 onFailed = fail("등받이 확인")
             )
         }
+        call("시트 온도 확인") {
+            vehicle.getSeat().checkSeatTemperatureCapabilities(
+                onComplete = { _, map -> (map.entries.firstOrNull { it.key == driverSeat } ?: map.entries.firstOrNull())?.let { seatTempArea = it.key; seatTempRange = it.value.minValue..it.value.maxValue }
+                    log("  · 시트 온도 지원: ${map.size}개 좌석 ${map.keys.map { it.toString() }}, 범위 $seatTempRange") },
+                onFailed = fail("시트 온도 확인")
+            )
+        }
+        call("통풍시트 확인") {
+            vehicle.getSeat().checkSeatVentilationCapabilities(
+                onComplete = { _, map -> (map.entries.firstOrNull { it.key == driverSeat } ?: map.entries.firstOrNull())?.let { seatVentArea = it.key; seatVentRange = it.value.minValue..it.value.maxValue }
+                    log("  · 통풍시트 지원: ${map.size}개 좌석 ${map.keys.map { it.toString() }}, 범위 $seatVentRange") },
+                onFailed = fail("통풍시트 확인")
+            )
+        }
         call("창문 확인") {
             vehicle.getWindow().checkWindowPositionCapabilities(
                 onComplete = { _, map -> map.entries.firstOrNull()?.let { windowArea = it.key; windowRange = it.value.minValue..it.value.maxValue } },
@@ -92,14 +110,14 @@ class CabinController(
     fun refreshMode() {
         log("❄️ 각성 모드: 시원한 바람, 통풍시트")
         climate(temperature = 20f, fanRatio = 0.6f, ac = true)
-        call("통풍시트") { vehicle.getSeat().setHvacSeatVentilation(driverSeat, 2, onFailed = fail("통풍시트")) }
+        seatCooling(level = 2)
     }
 
     /** 정차 후 낮잠 모드 */
     fun napMode() {
         log("🌙 낮잠 모드: 조명 어둡게, 24℃, 등받이 뒤로")
         climate(temperature = 24f, fanRatio = 0.25f, ac = false)
-        call("시트 열선") { vehicle.getSeat().setHvacSeatTemperature(driverSeat, 1, onFailed = fail("시트 열선")) }
+        call("시트 열선") { vehicle.getSeat().setHvacSeatTemperature(seatTempArea, 1.coerceIn(seatTempRange), onFailed = fail("시트 열선")) }
         call("실내등") { vehicle.getLight().setCabinLightSwitch(LightSwitch.OFF, onFailed = fail("실내등")) }
         ambient(ratio = 0.1f)
         moveBackrest(MoveControl.BACKWARD)
@@ -109,13 +127,27 @@ class CabinController(
     fun wakeMode() {
         log("☀️ 기상 모드: 시원한 바람, 조명 밝게, 창문 살짝 열기")
         climate(temperature = 19f, fanRatio = 0.75f, ac = true)
-        call("시트 열선 끄기") { vehicle.getSeat().setHvacSeatTemperature(driverSeat, 0, onFailed = fail("시트 열선")) }
-        call("통풍시트") { vehicle.getSeat().setHvacSeatVentilation(driverSeat, 3, onFailed = fail("통풍시트")) }
+        seatCooling(level = 3)
         call("실내등") { vehicle.getLight().setCabinLightSwitch(LightSwitch.ON, onFailed = fail("실내등")) }
         ambient(ratio = 1f)
         val open = windowRange.first + ((windowRange.last - windowRange.first) * 0.2f).toInt()
         call("창문") { vehicle.getWindow().setWindowPosition(windowArea, open, onFailed = fail("창문")) }
         moveBackrest(MoveControl.FORWARD)
+    }
+
+    /**
+     * 통풍시트 켜기. 차량에 따라 '시트 온도' 하나로 열선(+)·통풍(-)을 함께 쓰거나(가상 콘솔의 V3~H3),
+     * 통풍 신호가 따로 있다. 지원 범위를 보고 맞는 쪽으로 보낸다.
+     */
+    private fun seatCooling(level: Int) {
+        log("  · 통풍시트 ${level}단 요청 (시트 온도 범위 $seatTempRange)")
+        if (seatTempRange.first < 0) {
+            val v = (-level).coerceIn(seatTempRange)
+            call("통풍시트") { vehicle.getSeat().setHvacSeatTemperature(seatTempArea, v, onComplete = { _, _ -> log("  · 통풍시트 V$level 설정 완료") }, onFailed = fail("통풍시트")) }
+        } else {
+            call("시트 열선 끄기") { vehicle.getSeat().setHvacSeatTemperature(seatTempArea, 0.coerceIn(seatTempRange), onFailed = fail("시트 열선")) }
+            call("통풍시트") { vehicle.getSeat().setHvacSeatVentilation(seatVentArea, level.coerceIn(seatVentRange), onComplete = { _, _ -> log("  · 통풍시트(별도 신호) $level 설정 완료") }, onFailed = fail("통풍시트")) }
+        }
     }
 
     private fun climate(temperature: Float, fanRatio: Float, ac: Boolean) {
