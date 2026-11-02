@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.roadmate.app.ai.GeminiChat
 import com.roadmate.app.car.CabinController
 import com.roadmate.app.car.RestNavigator
 import com.roadmate.app.car.VehicleMonitor
@@ -44,11 +45,17 @@ import java.util.Locale
  */
 class MainActivity : Activity() {
 
+    companion object {
+        /** AI 대답을 기다리는 최대 시간. 넘으면 기본 대본으로 대답한다. */
+        private const val AI_WAIT_MS = 4_000L
+    }
+
     private lateinit var vehicle: Vehicle
     private lateinit var monitor: VehicleMonitor
     private lateinit var voice: VoiceIO
     private lateinit var cabin: CabinController
     private lateinit var navigator: RestNavigator
+    private lateinit var ai: GeminiChat
 
     private val brain = RoadMateBrain(RoadMateBrain.Config.DEMO)
     private val main = Handler(Looper.getMainLooper())
@@ -74,6 +81,7 @@ class MainActivity : Activity() {
     private var riskColor = Color.parseColor("#4CC38A")
     private lateinit var detailView: TextView
     private lateinit var speechView: TextView
+    private lateinit var speechLabel: TextView
     private lateinit var mapCard: LinearLayout
     private lateinit var mapView: DrowsyMapView
     private lateinit var mapInfoView: TextView
@@ -102,6 +110,7 @@ class MainActivity : Activity() {
         cabin = CabinController(vehicle, ::log)
         navigator = RestNavigator(this, ::log)
         voice = VoiceIO(this, ::log)
+        ai = GeminiChat(BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL, ::log)
         voice.listener = object : VoiceIO.Listener {
             override fun onAnswer(text: String) { brain.onAnswer(text).forEach(::perform) }
             override fun onNoAnswer() { brain.onNoAnswer() }
@@ -115,6 +124,8 @@ class MainActivity : Activity() {
         }, 1_000L)
         main.postDelayed(loop, 1_500L)
         log("로드메이트 시작 — 시연 모드(말 걸기 간격 15초, 낮잠 30초)")
+        log(if (ai.isEnabled) "🤖 AI 대화 켜짐 (${BuildConfig.GEMINI_MODEL})" else "💬 AI 키 없음 — 기본 대본으로 대화")
+        speechLabel.text = if (ai.isEnabled) "🤖 로드메이트 · AI 대화" else "💬 로드메이트"
     }
 
     private val vehicleCallback = object : VehicleMonitor.Callback {
@@ -136,8 +147,31 @@ class MainActivity : Activity() {
     private fun perform(action: Action) {
         when (action) {
             is Action.Speak -> {
-                speechView.text = action.text
-                voice.speak(action.text, action.listenAfter)
+                if (action.listenAfter) ai.startTopic(action.text) // 먼저 말 걸기 = 새 대화 시작
+                say(action.text, action.listenAfter)
+            }
+            is Action.Reply -> {
+                if (!ai.isEnabled) {
+                    say(action.fallback, action.listenAfter)
+                } else {
+                    // 운전자를 오래 기다리게 하지 않도록, AI 대답이 4초 안에 안 오면 대본으로 먼저 대답한다.
+                    var answered = false
+                    val tooSlow = Runnable {
+                        if (!answered) {
+                            answered = true
+                            log("  · AI 응답이 늦어 기본 대본으로 대답")
+                            say(action.fallback, action.listenAfter)
+                        }
+                    }
+                    main.postDelayed(tooSlow, AI_WAIT_MS)
+                    ai.reply(action.answer, situation(), lastTurn = !action.listenAfter, fallback = action.fallback) { text ->
+                        if (answered) return@reply // 이미 대본으로 대답함
+                        answered = true
+                        main.removeCallbacks(tooSlow)
+                        if (text == null) log("  · AI 응답 없음 → 기본 대본으로 대답") else log("  · 🤖 AI 대답")
+                        say(text ?: action.fallback, action.listenAfter)
+                    }
+                }
             }
             Action.NavigateToRest -> {
                 cabin.refreshMode()
@@ -148,6 +182,22 @@ class MainActivity : Activity() {
                 cabin.wakeMode()
                 navigator.cancelGuide()
             }
+        }
+    }
+
+    private fun say(text: String, listenAfter: Boolean) {
+        speechView.text = text
+        voice.speak(text, listenAfter)
+    }
+
+    /** AI에게 알려 줄 지금 운전 상황 */
+    private fun situation(): String {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        return buildString {
+            append("연속 운전 ${brain.continuousMinutes}분, 현재 ${hour}시, 졸음 위험 점수 ${riskScore}/100")
+            if (dawOn) append(", 차량 졸음 경고 켜짐")
+            if (inHotspot) drowsyMap.hotspotAt(carKm)?.let { append(", 다른 운전자들이 자주 졸았던 '${it.name}' 구간 주행 중") }
+            append(", 경부고속도로 서울에서 대전 방향")
         }
     }
 
@@ -273,7 +323,7 @@ class MainActivity : Activity() {
 
         // ② 로드메이트가 마지막으로 한 말
         val speechCard = card().also { root.addView(it) }
-        speechCard.addView(text("💬 로드메이트", 22f, "#7A8A99", bold = true))
+        speechLabel = text("💬 로드메이트", 22f, "#7A8A99", bold = true).also { speechCard.addView(it) }
         speechView = text("운전하는 동안 옆에서 지켜볼게요. 졸리면 언제든 '쉬고 싶어'라고 말씀하세요.", 30f, "#FFFFFF").also { speechCard.addView(it) }
 
         // ③ 졸음 지도 (확장 기능)

@@ -155,9 +155,12 @@ class CabinController(
         val temp = temperature.coerceIn(tempRange.start, tempRange.endInclusive)
         val fan = fanRange.first + ((fanRange.last - fanRange.first) * fanRatio).toInt()
         call("공조 전원") { hvac.setHvacPower(powerArea, true, onFailed = fail("공조 전원")) }
-        call("온도") { hvac.setHvacTemperature(tempArea, temp, TemperatureUnit.CELSIUS, onFailed = fail("온도")) }
-        call("풍량") { hvac.setHvacFanSpeed(fanArea, fan, onFailed = fail("풍량")) }
-        call("에어컨") { hvac.setHvacAc(acArea, ac, onFailed = fail("에어컨")) }
+        // 전원이 켜진 직후에는 풍량 등이 '사용 불가'로 거절될 수 있어 잠깐 기다렸다가 설정한다.
+        main.postDelayed({
+            call("온도") { hvac.setHvacTemperature(tempArea, temp, TemperatureUnit.CELSIUS, onFailed = fail("온도")) }
+            call("풍량") { hvac.setHvacFanSpeed(fanArea, fan, onFailed = fail("풍량")) }
+            call("에어컨") { hvac.setHvacAc(acArea, ac, onFailed = fail("에어컨")) }
+        }, 700L)
     }
 
     private fun ambient(ratio: Float) = call("앰비언트 조명") {

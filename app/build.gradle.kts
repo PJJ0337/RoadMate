@@ -1,6 +1,13 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// AI 대화(Gemini) 키는 저장소에 올리지 않는 local.properties에서 읽는다. 없으면 기본 대본으로 동작.
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -13,6 +20,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+
+        buildConfigField("String", "GEMINI_API_KEY", "\"${localProps.getProperty("GEMINI_API_KEY", "")}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${localProps.getProperty("GEMINI_MODEL", "gemini-flash-lite-latest")}\"")
     }
 
     buildTypes {
@@ -21,6 +31,10 @@ android {
             // 공모전 제출용 release APK를 바로 실행할 수 있도록 debug 키로 서명
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

@@ -34,6 +34,12 @@ class RoadMateBrain(
     sealed class Action {
         /** 음성으로 말하기. listenAfter=true면 말한 뒤 운전자의 대답을 듣는다. */
         data class Speak(val text: String, val listenAfter: Boolean) : Action()
+        /**
+         * 운전자의 대답에 이어서 대화하기.
+         * AI 대화가 켜져 있으면 AI가 [answer]에 맞는 말을 만들고, 아니면(또는 실패하면) [fallback]을 말한다.
+         * listenAfter=true면 말한 뒤 다시 대답을 듣는다.
+         */
+        data class Reply(val answer: String, val fallback: String, val listenAfter: Boolean) : Action()
         /** 가까운 졸음쉼터로 길 안내 */
         data object NavigateToRest : Action()
         /** 정차 후 낮잠 모드 (조명 어둡게, 수면 온도) */
@@ -55,6 +61,12 @@ class RoadMateBrain(
     private var parked = true
     private var lastPromptMs: Long? = null   // 마지막으로 먼저 말 건 시각
     private var napStartMs: Long = 0
+    private var chatTurns = 0                // 이번 말 걸기에서 주고받은 대답 수
+
+    companion object {
+        /** 먼저 말 건 뒤 이어서 대화하는 최대 횟수 (대답할 때마다 깨어 있는지 확인) */
+        const val MAX_CHAT_TURNS = 3
+    }
 
     /** 화면 표시용 마지막 계산 결과 */
     var lastResult: DrowsinessRiskEngine.Result? = null
@@ -90,7 +102,11 @@ class RoadMateBrain(
             phase = Phase.GUIDING_TO_REST
             listOf(Action.Speak(script.restGuide(), listenAfter = false), Action.NavigateToRest)
         } else {
-            listOf(Action.Speak(script.replyTo(text), listenAfter = false))
+            chatTurns += 1
+            val keepTalking = phase == Phase.TALKING && chatTurns < MAX_CHAT_TURNS
+            // 대화 중이거나 막 마무리했으면 그때부터 다시 간격을 둔다 (바로 새 주제로 끼어들지 않음)
+            if (phase == Phase.TALKING) lastPromptMs = now()
+            listOf(Action.Reply(text, script.replyTo(text, keepTalking), listenAfter = keepTalking))
         }
     }
 
@@ -152,6 +168,7 @@ class RoadMateBrain(
         ) {
             phase = Phase.TALKING
             lastPromptMs = t
+            chatTurns = 0
             return listOf(Action.Speak(script.opener(continuousMinutes, dawWarningOn, inHotspot), listenAfter = true))
         }
 

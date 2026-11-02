@@ -107,4 +107,66 @@ class RoadMateBrainTest {
         val speak = brain.tick(hourOfDay = 10).single() as Action.Speak
         assertTrue(speak.text.contains("자주 졸았던"))
     }
+
+    @Test
+    fun 대답하면_같은_주제로_이어서_묻고_세번째에_마무리한다() {
+        driving()
+        brain.onDawWarning(true)
+        brain.tick(10)                               // 먼저 말 걸기 → 대화 시작
+        val first = brain.onAnswer("김치찌개요").single() as Action.Reply
+        assertTrue(first.listenAfter)                // 이어서 질문하고 대답을 듣는다
+        assertTrue(first.fallback.endsWith("?"))
+        val second = brain.onAnswer("집에서요").single() as Action.Reply
+        assertTrue(second.listenAfter)
+        val third = brain.onAnswer("네").single() as Action.Reply
+        assertTrue(!third.listenAfter)               // 세 번째 대답에서는 마무리
+        assertTrue(third.fallback.contains("쉬고 싶어"))
+    }
+
+    @Test
+    fun 대화가_이어지는_동안에는_새_주제로_끼어들지_않는다() {
+        driving()
+        brain.onDawWarning(true)
+        brain.tick(10)
+        clock += 14_000
+        brain.onAnswer("음악 듣고 있어요")
+        clock += 10_000                              // 처음 말 건 지 24초지만 마지막 대답은 10초 전
+        assertTrue(brain.tick(10).isEmpty())
+    }
+
+    @Test
+    fun 휴게소_이야기만으로는_안내하지_않는다() {
+        val script = DialogueScript()
+        assertTrue(!script.wantsRest("군산휴게소요"))
+        assertTrue(!script.wantsRest("휴게소 호두과자 좋아해요"))
+        assertTrue(script.wantsRest("휴게소 가자"))
+        assertTrue(script.wantsRest("졸음쉼터로 안내해 줘"))
+        assertTrue(script.wantsRest("좀 졸린 것 같아"))
+        assertTrue(script.wantsRest("쉬고 싶어"))
+    }
+
+    @Test
+    fun 대화를_마무리한_직후에는_바로_새_주제로_말걸지_않는다() {
+        driving()
+        brain.onDawWarning(true)
+        brain.tick(10)
+        brain.onAnswer("김치찌개"); brain.onAnswer("집에서요")
+        clock += 20_000
+        brain.onAnswer("네")                         // 마무리
+        clock += 2_000
+        assertTrue(brain.tick(10).isEmpty())         // 2초 만에 다시 묻지 않음
+        clock += 15_000
+        assertEquals(1, brain.tick(10).size)         // 간격이 지나면 다시 말 걸기
+    }
+
+    @Test
+    fun 졸음경고가_계속_켜져_있어도_같은_첫마디를_반복하지_않는다() {
+        driving()
+        brain.onDawWarning(true)
+        val first = (brain.tick(10).single() as Action.Speak).text
+        clock += 20_000
+        val second = (brain.tick(10).single() as Action.Speak).text
+        assertTrue(first.contains("졸음 경고"))
+        assertTrue(!second.contains("졸음 경고"))
+    }
 }
