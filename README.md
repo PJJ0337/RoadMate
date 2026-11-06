@@ -23,6 +23,13 @@ https://github.com/PJJ0337/RoadMate
 3. Pleos Connect Emulator(AVD, v2.1.0 / API 34)를 실행합니다.
 4. 상단 ▶ Run 버튼으로 `app`을 실행합니다.
 
+## 음성 안내와 오디오 포커스
+운영사무국 안내(주행 중 TTS 선제 안내 가능, 오디오 포커스 처리 필요)에 맞춰 처리합니다.
+- 말하기 전 `AudioFocusRequest(AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)`로 포커스를 요청하고, 말하기·대답 듣기가 끝나면 반납
+- `LOSS_TRANSIENT`(Gleo 호출 등): 즉시 멈춤 → 포커스가 돌아오면 하던 말을 이어서 / `LOSS`: 즉시 멈추고 반납 / `CAN_DUCK`: 소리만 낮춤
+- 다른 음성이 재생 중이라 포커스를 못 받으면 3초 뒤 다시 시도
+- 시연 패널 `🎙 음성비서 끼어들기(시험)` 버튼으로 확인할 수 있습니다.
+
 ## AI 대화 (선택)
 Pleos LLM SDK가 에뮬레이터 v2.1.0(2026-10-19)부터 제공 종료되어, 외부 AI(Google Gemini API)로 자유 대화를 합니다.
 - 키가 없으면 앱에 내장된 **기본 대본**으로 대화합니다 (인터넷 없이도 동작).

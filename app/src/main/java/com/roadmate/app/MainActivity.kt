@@ -93,7 +93,8 @@ class MainActivity : Activity() {
     private val loop = object : Runnable {
         override fun run() {
             val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-            brain.tick(hour).forEach(::perform)
+            // 말하거나 대답을 듣는 중에는 새 판단을 미룬다 (대화 도중에 새 질문이 끼어들지 않도록)
+            if (!voice.isBusy) brain.tick(hour).forEach(::perform)
             render()
             main.postDelayed(this, 1_000L)
         }
@@ -359,6 +360,10 @@ class MainActivity : Activity() {
                 moveCar(next.startKm + 1)
                 mapCard.visibility = View.VISIBLE
             }
+        ))
+        demoPanel.addView(row(
+            // Gleo(음성비서) 호출이 끼어드는 상황: 로드메이트는 즉시 멈췄다가 끝나면 이어서 말한다
+            button("🎙 음성비서 끼어들기(시험)", "#4B5563") { voice.simulateInterruption() }
         ))
 
         logView = text("", 18f, "#8FA0AE").apply { setPadding(0, 24, 0, 0); visibility = View.GONE }

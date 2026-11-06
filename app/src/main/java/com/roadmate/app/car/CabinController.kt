@@ -87,14 +87,14 @@ class CabinController(
         call("시트 온도 확인") {
             vehicle.getSeat().checkSeatTemperatureCapabilities(
                 onComplete = { _, map -> (map.entries.firstOrNull { it.key == driverSeat } ?: map.entries.firstOrNull())?.let { seatTempArea = it.key; seatTempRange = it.value.minValue..it.value.maxValue }
-                    log("  · 시트 온도 지원: ${map.size}개 좌석 ${map.keys.map { it.toString() }}, 범위 $seatTempRange") },
+                    log("  · 시트 온도 지원: ${map.size}개 좌석, 범위 $seatTempRange") },
                 onFailed = fail("시트 온도 확인")
             )
         }
         call("통풍시트 확인") {
             vehicle.getSeat().checkSeatVentilationCapabilities(
                 onComplete = { _, map -> (map.entries.firstOrNull { it.key == driverSeat } ?: map.entries.firstOrNull())?.let { seatVentArea = it.key; seatVentRange = it.value.minValue..it.value.maxValue }
-                    log("  · 통풍시트 지원: ${map.size}개 좌석 ${map.keys.map { it.toString() }}, 범위 $seatVentRange") },
+                    log("  · 통풍시트 지원: ${map.size}개 좌석, 범위 $seatVentRange") },
                 onFailed = fail("통풍시트 확인")
             )
         }
@@ -158,9 +158,19 @@ class CabinController(
         // 전원이 켜진 직후에는 풍량 등이 '사용 불가'로 거절될 수 있어 잠깐 기다렸다가 설정한다.
         main.postDelayed({
             call("온도") { hvac.setHvacTemperature(tempArea, temp, TemperatureUnit.CELSIUS, onFailed = fail("온도")) }
-            call("풍량") { hvac.setHvacFanSpeed(fanArea, fan, onFailed = fail("풍량")) }
+            setFanWithRetry(fan, retriesLeft = 2)
             call("에어컨") { hvac.setHvacAc(acArea, ac, onFailed = fail("에어컨")) }
         }, 700L)
+    }
+
+    /** 공조 전원이 막 켜졌을 때는 풍량 설정이 거절될 수 있어, 실패하면 잠시 뒤 다시 시도한다. */
+    private fun setFanWithRetry(fan: Int, retriesLeft: Int) {
+        call("풍량") {
+            vehicle.getHVAC().setHvacFanSpeed(fanArea, fan, onFailed = { e ->
+                if (retriesLeft > 0) main.postDelayed({ setFanWithRetry(fan, retriesLeft - 1) }, 1_500L)
+                else log("  · 풍량 실패: ${e.message}")
+            })
+        }
     }
 
     private fun ambient(ratio: Float) = call("앰비언트 조명") {
