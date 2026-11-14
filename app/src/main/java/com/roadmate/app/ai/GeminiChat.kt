@@ -6,6 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import com.roadmate.app.core.PrivacyFilter
 
 /**
  * AI 자유 대화 (Google Gemini API).
@@ -39,7 +40,8 @@ class GeminiChat(
      */
     fun reply(answer: String, situation: String, lastTurn: Boolean, fallback: String, onResult: (String?) -> Unit) {
         if (!isEnabled) { onResult(null); return }
-        history += "user" to answer
+        // 비식별화: 전화번호·이메일·차량번호·긴 숫자열을 가리고 길이를 제한한 뒤 보낸다.
+        history += "user" to PrivacyFilter.mask(answer)
         Thread {
             val text = try {
                 // 짧은 대화라 '생각(thinking)'은 최소로. 이 설정을 모르는 모델이면 설정 없이 한 번 더 시도한다.

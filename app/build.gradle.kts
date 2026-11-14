@@ -30,6 +30,8 @@ android {
             isMinifyEnabled = false
             // 공모전 제출용 release APK를 바로 실행할 수 있도록 debug 키로 서명
             signingConfig = signingConfigs.getByName("debug")
+            // 제출용 APK에는 개발용과 분리한 제출 전용 키만 넣는다(심사 후 폐기). 없으면 대본으로 동작.
+            buildConfigField("String", "GEMINI_API_KEY", "\"${localProps.getProperty("GEMINI_API_KEY_RELEASE", "")}\"")
         }
     }
 
