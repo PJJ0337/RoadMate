@@ -81,10 +81,10 @@ class DialogueScript {
         "많이 피곤하신 것 같아요. 가까운 졸음쉼터로 안내할게요. 도착해서 주차하시면 편하게 쉬실 수 있게 준비해 둘게요."
 
     fun napStart(napMs: Long): String =
-        "도착했어요. ${formatMinutes((napMs / 60_000L).toInt().coerceAtLeast(1))} 뒤에 깨워 드릴게요. 시트를 뒤로 눕히고 편하게 쉬세요."
+        "휴식을 시작해요. ${if (napMs < 60_000L) "${napMs / 1_000L}초" else formatMinutes((napMs / 60_000L).toInt())} 뒤에 깨워 드릴게요."
 
     fun wakeUp(): String =
-        "잘 쉬셨어요? 시원한 바람 틀어 드렸어요. 기지개 한 번 켜고 천천히 출발해요."
+        "휴식 시간이 끝났어요. 아직 졸리면 더 쉬어 주세요. 시트와 주변을 확인한 뒤 출발 여부를 결정해 주세요."
 
     private fun formatMinutes(m: Int): String {
         val h = m / 60

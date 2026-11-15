@@ -127,7 +127,7 @@ class VoiceIO(
                     if (completed && text.isNotBlank()) main.post {
                         if (listening && !answered) {
                             answered = true
-                            log("🎙 운전자: $text")
+                            log("🎙 운전자 대답 인식 완료")
                             finishListening(noAnswer = false)
                             listener?.onAnswer(text)
                         }
@@ -321,10 +321,22 @@ class VoiceIO(
         }
     }
 
-    fun release() {
+    fun cancel() {
         main.removeCallbacks(timeout)
         main.removeCallbacks(retrySpeak)
+        pendingText = null
+        pendingListen = false
+        listenAfterSpeech = false
+        speaking = false
+        listening = false
+        answered = true
+        safely { tts.stop() }
+        safely { stt.stop() }
         releaseFocus()
+    }
+
+    fun release() {
+        cancel()
         safely { tts.release() }
         safely { stt.release() }
     }

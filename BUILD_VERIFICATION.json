@@ -1,0 +1,51 @@
+{
+  "version": "0.2.1",
+  "baseCommit": "305a29a2242ffd7e7b2bfeea1bc7ceeb09fc3740",
+  "releaseApkSHA256": "ef7a12b6076aa781eb2c1536df1b7c3f142c5f4764706343f13afb1ed49781fb",
+  "build": "Gradle 8.10.2 / AGP 8.8.2 / JDK 21 (target Java 17) / compileSdk 35",
+  "unitTestSuites": [
+    {
+      "name": "com.roadmate.app.core.DrowsinessRiskEngineTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.roadmate.app.core.DrowsyMapTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.roadmate.app.core.ParkingGateTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.roadmate.app.core.PrivacyFilterTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.roadmate.app.core.ResponseGateTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.roadmate.app.core.RoadMateBrainTest",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "runtimeVerification": "See docs/VALIDATION-0.2.1.md; static, unit and emulator checks have different scopes."
+}

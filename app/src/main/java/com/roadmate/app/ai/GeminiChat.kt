@@ -25,9 +25,19 @@ class GeminiChat(
     /** 지금 대화 주제의 주고받은 말 (role = "user" | "model") */
     private val history = mutableListOf<Pair<String, String>>()
     private val main = Handler(Looper.getMainLooper())
+    @Volatile private var generation = 0L
+    @Volatile private var activeConnection: HttpURLConnection? = null
+
+    /** Invalidate callbacks when a driving phase, permission, or Activity changes. */
+    fun cancelPending() {
+        generation++
+        activeConnection?.disconnect()
+        activeConnection = null
+    }
 
     /** 로드메이트가 먼저 말을 걸면 새 대화를 시작한다. */
     fun startTopic(openerText: String) {
+        cancelPending()
         history.clear()
         history += "user" to "(운전 중. 로드메이트가 먼저 말을 걸었다)"
         history += "model" to openerText
@@ -41,18 +51,23 @@ class GeminiChat(
     fun reply(answer: String, situation: String, lastTurn: Boolean, fallback: String, onResult: (String?) -> Unit) {
         if (!isEnabled) { onResult(null); return }
         // 비식별화: 전화번호·이메일·차량번호·긴 숫자열을 가리고 길이를 제한한 뒤 보낸다.
-        history += "user" to PrivacyFilter.mask(answer)
+        cancelPending()
+        val token = generation
+        val maskedAnswer = PrivacyFilter.mask(answer)
+        val messages = history.toList() + ("user" to maskedAnswer)
         Thread {
             val text = try {
                 // 짧은 대화라 '생각(thinking)'은 최소로. 이 설정을 모르는 모델이면 설정 없이 한 번 더 시도한다.
-                call(buildRequest(situation, lastTurn, minimalThinking = useThinkingConfig))
-                    ?: if (thinkingRejected) { useThinkingConfig = false; thinkingRejected = false; call(buildRequest(situation, lastTurn, false)) } else null
+                call(buildRequest(situation, lastTurn, minimalThinking = useThinkingConfig, messages = messages), token)
+                    ?: if (thinkingRejected) { useThinkingConfig = false; thinkingRejected = false; call(buildRequest(situation, lastTurn, false, messages), token) } else null
             } catch (e: Exception) {
-                log("  · AI 대화 실패: ${e.message}")
+                if (token == generation) log("  · AI 연결 실패 → 기본 안내")
                 null
             }
             val cleaned = text?.let(::clean)?.takeIf { it.isNotBlank() }
             main.post {
+                if (token != generation) return@post
+                history += "user" to maskedAnswer
                 // 실패해서 대본으로 대답한 경우에도 그 말을 기록해 대화 순서(사용자↔모델)를 맞춘다.
                 history += "model" to (cleaned ?: fallback)
                 onResult(cleaned)
@@ -63,7 +78,7 @@ class GeminiChat(
     @Volatile private var useThinkingConfig = true
     @Volatile private var thinkingRejected = false
 
-    private fun buildRequest(situation: String, lastTurn: Boolean, minimalThinking: Boolean): JSONObject {
+    private fun buildRequest(situation: String, lastTurn: Boolean, minimalThinking: Boolean, messages: List<Pair<String, String>>): JSONObject {
         val system = buildString {
             append(SYSTEM_PROMPT)
             append("\n\n[지금 운전 상황] ").append(situation)
@@ -71,7 +86,7 @@ class GeminiChat(
             else append("\n[이번 차례] 운전자의 말에 짧게 반응하고, 대답하기 쉬운 질문 하나로 끝내.")
         }
         val contents = JSONArray()
-        history.takeLast(12).forEach { (role, text) ->
+        messages.takeLast(12).forEach { (role, text) ->
             contents.put(JSONObject().put("role", role).put("parts", JSONArray().put(JSONObject().put("text", text))))
         }
         return JSONObject()
@@ -84,7 +99,8 @@ class GeminiChat(
             })
     }
 
-    private fun call(body: JSONObject): String? {
+    private fun call(body: JSONObject, token: Long): String? {
+        if (token != generation) return null
         val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -94,7 +110,9 @@ class GeminiChat(
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("x-goog-api-key", apiKey)
         }
+        activeConnection = conn
         try {
+            if (token != generation) return null
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
@@ -104,8 +122,7 @@ class GeminiChat(
                     thinkingRejected = true // 생각 설정을 지원하지 않는 모델 → 설정 없이 다시 시도
                     return null
                 }
-                val msg = runCatching { JSONObject(response).getJSONObject("error").optString("message") }.getOrNull()
-                log("  · AI 응답 오류 $code: ${(msg ?: response).take(120)}")
+                log("  · AI 응답 오류 $code → 기본 안내")
                 return null
             }
             val candidate = JSONObject(response).optJSONArray("candidates")?.optJSONObject(0) ?: return null
@@ -120,6 +137,7 @@ class GeminiChat(
                 .joinToString("") { it.optString("text") }
         } finally {
             conn.disconnect()
+            if (activeConnection === conn) activeConnection = null
         }
     }
 

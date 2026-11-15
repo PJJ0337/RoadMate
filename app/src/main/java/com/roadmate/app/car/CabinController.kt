@@ -23,10 +23,36 @@ import android.os.Looper
  */
 class CabinController(
     private val vehicle: Vehicle,
-    private val log: (String) -> Unit
+    private val log: (String) -> Unit,
+    private val parkedConfirmed: () -> Boolean
 ) {
     private val driverSeat = SeatArea(SeatValue.ROW_1_LEFT)
     private val main = Handler(Looper.getMainLooper())
+    @Volatile private var generation = 0L
+    private var parkedOperation = false
+    private var backrestSupported = false
+    private var windowSupported = false
+    private var backrestMoving = false
+
+    /** Cancel delayed climate retries and stop any seat movement immediately. */
+    fun cancelPending() {
+        generation++
+        main.removeCallbacksAndMessages(null)
+        if (backrestMoving) {
+            call("등받이 정지") { vehicle.getSeat().moveSeatBackrestAngle(backrestArea, MoveControl.STOP, onFailed = fail("등받이")) }
+            backrestMoving = false
+        }
+        parkedOperation = false
+    }
+
+    private fun begin(parkedOnly: Boolean): Boolean {
+        cancelPending()
+        if (parkedOnly && !parkedConfirmed()) { log("실제 기어 P가 확인되지 않아 실내 제어를 보류합니다"); return false }
+        parkedOperation = parkedOnly
+        return true
+    }
+
+    private fun active(token: Long): Boolean = token == generation && (!parkedOperation || parkedConfirmed())
 
     // Capability 확인 결과 (확인 전에는 운전석 기본값)
     private var powerArea: SeatArea = driverSeat
@@ -80,7 +106,7 @@ class CabinController(
         }
         call("등받이 확인") {
             vehicle.getSeat().checkMoveSeatBackrestAngleCapabilities(
-                onComplete = { _, areas -> areas.firstOrNull()?.let { backrestArea = it } },
+                onComplete = { _, areas -> areas.firstOrNull { it == driverSeat }?.let { backrestArea = it; backrestSupported = true } },
                 onFailed = fail("등받이 확인")
             )
         }
@@ -100,7 +126,7 @@ class CabinController(
         }
         call("창문 확인") {
             vehicle.getWindow().checkWindowPositionCapabilities(
-                onComplete = { _, map -> map.entries.firstOrNull()?.let { windowArea = it.key; windowRange = it.value.minValue..it.value.maxValue } },
+                onComplete = { _, map -> map.entries.firstOrNull { it.key == windowArea }?.let { windowRange = it.value.minValue..it.value.maxValue; windowSupported = true } },
                 onFailed = fail("창문 확인")
             )
         }
@@ -108,6 +134,7 @@ class CabinController(
 
     /** 졸음쉼터로 가는 동안: 시원한 바람 + 통풍시트 */
     fun refreshMode() {
+        if (!begin(parkedOnly = false)) return
         log("❄️ 각성 모드: 시원한 바람, 통풍시트")
         climate(temperature = 20f, fanRatio = 0.6f, ac = true)
         seatCooling(level = 2)
@@ -115,6 +142,7 @@ class CabinController(
 
     /** 정차 후 낮잠 모드 */
     fun napMode() {
+        if (!begin(parkedOnly = true)) return
         log("🌙 낮잠 모드: 조명 어둡게, 24℃, 등받이 뒤로")
         climate(temperature = 24f, fanRatio = 0.25f, ac = false)
         call("시트 열선") { vehicle.getSeat().setHvacSeatTemperature(seatTempArea, 1.coerceIn(seatTempRange), onFailed = fail("시트 열선")) }
@@ -125,13 +153,14 @@ class CabinController(
 
     /** 낮잠이 끝나면 기상 모드 */
     fun wakeMode() {
+        if (!begin(parkedOnly = true)) return
         log("☀️ 기상 모드: 시원한 바람, 조명 밝게, 창문 살짝 열기")
         climate(temperature = 19f, fanRatio = 0.75f, ac = true)
         seatCooling(level = 3)
         call("실내등") { vehicle.getLight().setCabinLightSwitch(LightSwitch.ON, onFailed = fail("실내등")) }
         ambient(ratio = 1f)
         val open = windowRange.first + ((windowRange.last - windowRange.first) * 0.2f).toInt()
-        call("창문") { vehicle.getWindow().setWindowPosition(windowArea, open, onFailed = fail("창문")) }
+        if (windowSupported && parkedConfirmed()) call("창문") { vehicle.getWindow().setWindowPosition(windowArea, open, onFailed = fail("창문")) }
         moveBackrest(MoveControl.FORWARD)
     }
 
@@ -156,18 +185,21 @@ class CabinController(
         val fan = fanRange.first + ((fanRange.last - fanRange.first) * fanRatio).toInt()
         call("공조 전원") { hvac.setHvacPower(powerArea, true, onFailed = fail("공조 전원")) }
         // 전원이 켜진 직후에는 풍량 등이 '사용 불가'로 거절될 수 있어 잠깐 기다렸다가 설정한다.
+        val token = generation
         main.postDelayed({
+            if (!active(token)) return@postDelayed
             call("온도") { hvac.setHvacTemperature(tempArea, temp, TemperatureUnit.CELSIUS, onFailed = fail("온도")) }
-            setFanWithRetry(fan, retriesLeft = 2)
+            setFanWithRetry(fan, retriesLeft = 2, token = token)
             call("에어컨") { hvac.setHvacAc(acArea, ac, onFailed = fail("에어컨")) }
         }, 700L)
     }
 
     /** 공조 전원이 막 켜졌을 때는 풍량 설정이 거절될 수 있어, 실패하면 잠시 뒤 다시 시도한다. */
-    private fun setFanWithRetry(fan: Int, retriesLeft: Int) {
+    private fun setFanWithRetry(fan: Int, retriesLeft: Int, token: Long) {
+        if (!active(token)) return
         call("풍량") {
             vehicle.getHVAC().setHvacFanSpeed(fanArea, fan, onFailed = { e ->
-                if (retriesLeft > 0) main.postDelayed({ setFanWithRetry(fan, retriesLeft - 1) }, 1_500L)
+                if (retriesLeft > 0 && active(token)) main.postDelayed({ setFanWithRetry(fan, retriesLeft - 1, token) }, 1_500L)
                 else log("  · 풍량 실패: ${e.message}")
             })
         }
@@ -184,8 +216,11 @@ class CabinController(
 
     /** 등받이는 '움직이기 시작 → 3초 뒤 멈춤' 방식으로 제어한다. */
     private fun moveBackrest(direction: MoveControl) {
+        if (!backrestSupported || !parkedConfirmed()) { log("운전석 등받이 지원/주차 확인 전에는 움직이지 않습니다"); return }
+        backrestMoving = true
         call("등받이") { vehicle.getSeat().moveSeatBackrestAngle(backrestArea, direction, onFailed = fail("등받이")) }
         main.postDelayed({
+            backrestMoving = false
             call("등받이 정지") { vehicle.getSeat().moveSeatBackrestAngle(backrestArea, MoveControl.STOP, onFailed = fail("등받이")) }
         }, 3_000L)
     }
@@ -193,6 +228,7 @@ class CabinController(
     private fun fail(name: String): (Exception) -> Unit = { e -> log("  · $name 실패: ${e.message}") }
 
     private fun call(name: String, block: () -> Unit) {
+        if (parkedOperation && !parkedConfirmed() && name != "등받이 정지") return
         try { block() } catch (e: Exception) { log("  · $name 사용 불가: ${e.message}") }
     }
 }

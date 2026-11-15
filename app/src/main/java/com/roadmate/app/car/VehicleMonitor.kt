@@ -31,6 +31,7 @@ class VehicleMonitor(
         fun onTripMinutes(minutes: Int)
         fun onCruise(active: Boolean)
         fun onGear(isPark: Boolean, gearName: String)
+        fun onGearUnavailable()
         fun onDriverInput(source: String)
         fun onDawWarning(on: Boolean)
     }
@@ -53,9 +54,10 @@ class VehicleMonitor(
 
     private val gearListener = object : GearSelectionListener {
         override fun onSelected(gear: VehicleGear?) {
-            gear?.let { callback?.onGear(it == VehicleGear.GEAR_PARK, it.name) }
+            if (gear == null) callback?.onGearUnavailable()
+            else callback?.onGear(gear == VehicleGear.GEAR_PARK, gear.name)
         }
-        override fun onFailed(e: Exception) = log("기어 구독 실패: ${e.message}")
+        override fun onFailed(e: Exception) { callback?.onGearUnavailable(); log("기어 구독 실패: ${e.message}") }
     }
 
     private val turnSignalListener = object : TurnSignalStateListener {
@@ -102,8 +104,8 @@ class VehicleMonitor(
         }
         safely("현재 기어") {
             vehicle.getGear().getCurrentGearSelectionState(
-                onComplete = { g -> g?.let { callback.onGear(it == VehicleGear.GEAR_PARK, it.name) } },
-                onFailed = { e -> log("현재 기어 조회 실패: ${e.message}") }
+                onComplete = { g -> if (g == null) callback.onGearUnavailable() else callback.onGear(g == VehicleGear.GEAR_PARK, g.name) },
+                onFailed = { e -> callback.onGearUnavailable(); log("현재 기어 조회 실패: ${e.message}") }
             )
         }
         log("차량 신호 구독 시작")

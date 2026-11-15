@@ -72,7 +72,9 @@ class RoadMateBrainTest {
         brain.onTripMinutes(150)
         brain.onAnswer("쉬고 싶어")                  // 안내 단계
         brain.onGear(isPark = true)
-        assertTrue(brain.tick(10).contains(Action.StartNap))
+        assertTrue(brain.tick(10).contains(Action.RequestNapConfirmation))
+        assertEquals(Phase.AWAITING_NAP_CONFIRMATION, brain.phase)
+        assertTrue(brain.confirmNap().contains(Action.StartNap))
         assertEquals(Phase.NAPPING, brain.phase)
 
         clock += 10_000
@@ -168,5 +170,90 @@ class RoadMateBrainTest {
         val second = (brain.tick(10).single() as Action.Speak).text
         assertTrue(first.contains("졸음 경고"))
         assertTrue(!second.contains("졸음 경고"))
+    }
+
+    @Test
+    fun simulatedParkNeverStartsOrRequestsNap() {
+        driving()
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true, confirmed = false)
+        assertTrue(brain.tick(10).isEmpty())
+        assertTrue(brain.confirmNap().isEmpty())
+        assertEquals(Phase.GUIDING_TO_REST, brain.phase)
+    }
+
+    @Test
+    fun parkNeedsExplicitConfirmation() {
+        driving()
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        assertEquals(listOf(Action.RequestNapConfirmation), brain.tick(10))
+        assertTrue(brain.tick(10).isEmpty())
+        assertEquals(Phase.AWAITING_NAP_CONFIRMATION, brain.phase)
+    }
+
+    @Test
+    fun departureDuringNapCancelsWithoutWakeCommandsOrRestCredit() {
+        driving()
+        brain.onTripMinutes(130)
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        brain.tick(10)
+        brain.confirmNap()
+        clock += 1_000
+        brain.onGear(false)
+        val actions = brain.tick(10, allowConversation = false)
+        assertEquals(listOf(Action.StopCabin), actions)
+        assertEquals(130, brain.continuousMinutes)
+    }
+
+    @Test
+    fun signalLossBeforeConfirmationCannotStartNap() {
+        driving()
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        brain.tick(10)
+        brain.onGear(true, confirmed = false)
+        assertTrue(brain.confirmNap().isEmpty())
+        assertEquals(listOf(Action.StopCabin), brain.tick(10))
+    }
+
+    @Test
+    fun userCancellationStopsAndPreservesDrivingTime() {
+        driving()
+        brain.onTripMinutes(100)
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        brain.tick(10)
+        brain.confirmNap()
+        assertEquals(listOf(Action.StopCabin), brain.cancelRest())
+        assertEquals(100, brain.continuousMinutes)
+        clock += 60_000
+        assertTrue(brain.tick(10).isEmpty())
+    }
+
+    @Test
+    fun speechDoesNotPreventNapTimerCompletion() {
+        driving()
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        brain.tick(10)
+        brain.confirmNap()
+        clock += 31_000
+        assertTrue(brain.tick(10, allowConversation = false).contains(Action.StartWake))
+    }
+
+    @Test
+    fun vehicleTripResetDoesNotSuppressFutureContinuousMinutes() {
+        driving()
+        brain.onTripMinutes(130)
+        brain.onAnswer("쉬고 싶어")
+        brain.onGear(true)
+        brain.tick(10)
+        brain.confirmNap()
+        clock += 31_000
+        brain.tick(10)
+        brain.onTripMinutes(5)
+        assertEquals(5, brain.continuousMinutes)
     }
 }

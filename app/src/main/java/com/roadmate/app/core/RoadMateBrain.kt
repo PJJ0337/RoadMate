@@ -28,7 +28,7 @@ class RoadMateBrain(
     }
 
     /** 현재 단계 */
-    enum class Phase { DRIVING, TALKING, GUIDING_TO_REST, NAPPING }
+    enum class Phase { DRIVING, TALKING, GUIDING_TO_REST, AWAITING_NAP_CONFIRMATION, NAPPING }
 
     /** 두뇌가 내리는 행동 지시 */
     sealed class Action {
@@ -43,7 +43,9 @@ class RoadMateBrain(
         /** 가까운 졸음쉼터로 길 안내 */
         data object NavigateToRest : Action()
         /** 정차 후 낮잠 모드 (조명 어둡게, 수면 온도) */
+        data object RequestNapConfirmation : Action()
         data object StartNap : Action()
+        data object StopCabin : Action()
         /** 기상 모드 (시원한 바람, 조명 밝게) */
         data object StartWake : Action()
     }
@@ -59,6 +61,7 @@ class RoadMateBrain(
     private var inHotspot = false         // 졸음 지도: 졸음 다발 구간 안인지
     private var missedResponses = 0
     private var parked = true
+    private var parkedConfirmed = false
     private var lastPromptMs: Long? = null   // 마지막으로 먼저 말 건 시각
     private var napStartMs: Long = 0
     private var chatTurns = 0                // 이번 말 걸기에서 주고받은 대답 수
@@ -75,7 +78,12 @@ class RoadMateBrain(
     /** 휴식 이후 연속 운전 시간(분) */
     val continuousMinutes: Int get() = (tripMinutes - restBaselineMinutes).coerceAtLeast(0)
 
-    fun onTripMinutes(minutes: Int) { tripMinutes = minutes }
+    fun onTripMinutes(minutes: Int) {
+        // The vehicle trip counter may reset independently of this Activity.
+        val next = minutes.coerceAtLeast(0)
+        if (next < tripMinutes) restBaselineMinutes = 0
+        tripMinutes = next
+    }
 
     fun onCruise(active: Boolean) {
         cruiseOnSinceMs = if (active) (cruiseOnSinceMs ?: now()) else null
@@ -86,13 +94,31 @@ class RoadMateBrain(
 
     fun onDawWarning(on: Boolean) { dawWarningOn = on }
 
-    fun onGear(isPark: Boolean) { parked = isPark }
+    fun onGear(isPark: Boolean, confirmed: Boolean = true) {
+        parked = isPark
+        parkedConfirmed = isPark && confirmed
+    }
+
+    fun confirmNap(): List<Action> {
+        if (phase != Phase.AWAITING_NAP_CONFIRMATION || !parkedConfirmed) return emptyList()
+        phase = Phase.NAPPING
+        napStartMs = now()
+        return listOf(Action.StartNap, Action.Speak(script.napStart(config.napDurationMs), false))
+    }
+
+    fun cancelRest(): List<Action> {
+        if (phase != Phase.NAPPING && phase != Phase.AWAITING_NAP_CONFIRMATION) return emptyList()
+        phase = Phase.DRIVING
+        lastPromptMs = now()
+        return listOf(Action.StopCabin)
+    }
 
     /** 졸음 지도에서 '사람들이 자주 조는 구간'에 들어왔는지 */
     fun onHotspot(inside: Boolean) { inHotspot = inside }
 
     /** 운전자가 대답했을 때. 돌려준 Action으로 바로 응답한다. */
     fun onAnswer(text: String): List<Action> {
+        if (phase == Phase.AWAITING_NAP_CONFIRMATION || phase == Phase.NAPPING) return emptyList()
         missedResponses = 0
         lastDriverInputMs = now()
         return if (script.wantsRest(text)) {
@@ -114,14 +140,19 @@ class RoadMateBrain(
     fun onNoAnswer() { missedResponses += 1 }
 
     /** 주기적으로(예: 1초마다) 호출. 지금 해야 할 행동을 돌려준다. */
-    fun tick(hourOfDay: Int): List<Action> {
+    fun tick(hourOfDay: Int, allowConversation: Boolean = true): List<Action> {
         val t = now()
 
+        if (phase == Phase.AWAITING_NAP_CONFIRMATION) {
+            return if (!parkedConfirmed) cancelRest() else emptyList()
+        }
+
+        // Safety transitions must run even while speech or an AI request is active.
         // 4단계: 파워냅 중이면 시간만 확인
         if (phase == Phase.NAPPING) {
-            if (!parked) { // 낮잠 중에 출발하면 낮잠 종료
-                finishRest()
-                return listOf(Action.StartWake)
+            if (!parkedConfirmed) {
+                // Departure is cancellation, not a completed rest. Never move the seat/window.
+                return cancelRest()
             }
             if (t - napStartMs >= config.napDurationMs) {
                 finishRest()
@@ -132,13 +163,14 @@ class RoadMateBrain(
 
         // 쉬러 가는 중이거나 대화 중에 주차(P)하면 낮잠 모드 시작
         if (parked) {
-            if (phase == Phase.GUIDING_TO_REST || (phase == Phase.TALKING && missedResponses > 0)) {
-                phase = Phase.NAPPING
-                napStartMs = t
-                return listOf(Action.StartNap, Action.Speak(script.napStart(config.napDurationMs), listenAfter = false))
+            if (parkedConfirmed && (phase == Phase.GUIDING_TO_REST || (phase == Phase.TALKING && missedResponses > 0))) {
+                phase = Phase.AWAITING_NAP_CONFIRMATION
+                return listOf(Action.RequestNapConfirmation)
             }
             return emptyList() // 주차 중에는 말 걸지 않는다
         }
+
+        if (!allowConversation) return emptyList()
 
         // 1단계: 졸음 위험 예측
         val result = engine.evaluate(
