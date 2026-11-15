@@ -1,10 +1,32 @@
 # 로드메이트 (RoadMate)
 
+<img src="docs/logo.png" alt="RoadMate 로고" width="360">
+
 졸음의 시작부터 끝까지 책임지는 AI 동승자.
 졸리기 전에 먼저 말을 걸고, 쉬어야 할 땐 차를 낮잠 공간으로 바꿔 개운하게 깨워주는 Pleos Connect 차량용 앱.
 
 ## 저장소
 https://github.com/PJJ0337/RoadMate
+
+## 화면
+| 먼저 말 걸기 (위험도 '주의') | 졸음 지도 (예시 데이터) |
+|---|---|
+| ![먼저 말 걸기](docs/screenshots/app_dialogue.png) | ![졸음 지도](docs/screenshots/app_drowsymap.png) |
+
+### 차량 제어 결과 (앱 + Virtual Console 같은 순간)
+**파워냅** — 주차하면 실내 24℃, 조명 10%, 등받이 뒤로
+
+![파워냅](docs/screenshots/04_nap.png)
+
+**기상** — 19℃ 시원한 바람, 앰비언트 100%, 운전석 창문 20%
+
+![기상](docs/screenshots/05_wake.png)
+
+### 시연 영상
+- https://youtu.be/dm11VHPn1Ck (2분 16초, YouTube 일부 공개 · 주행 시간·졸음 지도는 모의 데이터, 운전자 음성은 AI 재연)
+
+## 구조
+![로드메이트 구조](docs/architecture.png)
 
 ## 동작 흐름
 1. **예측**: 연속 운전 시간·시간대·크루즈·운전자 조작·순정 졸음 경고·대답 여부로 졸음 위험 점수(0~100) 계산
@@ -51,7 +73,8 @@ Pleos LLM SDK가 에뮬레이터 v2.1.0(2026-10-19)부터 제공 종료되어, �
 - 판단 로직 단위 테스트 28개 (`app/src/test`, Android Studio에서 `core` 폴더 우클릭 > Run Tests)
 
 ## 테스트 환경
-- Pleos Connect Emulator v2.1.0 (Android 14, API 34)
+- Pleos Connect Emulator v2.1.0 (Android Automotive, Android 14, API 34)
+- 에뮬레이터 화면 규격: 2560 × 1440 px, 160 dpi (AVD `Pleos_Connect_v2.1.0`)
 - Android Gradle Plugin 8.8.2 / Gradle 8.10.2 / Kotlin 2.0.0 / JDK 17
 - minSdk 28, targetSdk 35
 - Pleos Connect Virtual Console: `adb forward tcp:8088 tcp:8088` 후 http://127.0.0.1:8088/
